@@ -13,12 +13,34 @@ artifact (`models/food_risk/latest.json`).
 - **Algorithm**: XGBoost (`XGBClassifier`), RandomForest fallback if xgboost's
   native lib fails to load (common on macOS without `libomp` — the code
   catches this and falls back automatically, see `train.py`).
-- **Features**: 14 columns in `app/ml/food_risk/features.py::FEATURE_COLUMNS`
-  — days_to_expiry, perishability_level, current_temperature,
-  temperature_deviation, cumulative_temperature_exposure, humidity,
-  storage_deviation_duration, supplier_defect_rate, supplier_reliability,
-  batch_age, previous_rejection_rate, consumption_rate, consumption_change,
-  historical_incidents.
+- **Features**: 15 columns in `app/ml/food_risk/features.py::FEATURE_COLUMNS`
+  — days_to_expiry, **pct_shelf_life_remaining**, perishability_level,
+  current_temperature, temperature_deviation, cumulative_temperature_exposure,
+  humidity, storage_deviation_duration, supplier_defect_rate,
+  supplier_reliability, batch_age, previous_rejection_rate, consumption_rate,
+  consumption_change, historical_incidents.
+- **Why pct_shelf_life_remaining exists** (found via manual-entry testing,
+  not caught by automated tests originally): raw `days_to_expiry` alone
+  can't generalize across categories with wildly different shelf lives.
+  A fresh rice batch (300 of 540 days left) and a fresh chicken batch (4 of
+  4 days left) both look "safe," but the *first* model version was trained
+  on `days_to_expiry` sampled from one uniform `-2..30` range regardless of
+  category — so a real rice batch's `days_to_expiry≈300` was wildly outside
+  anything the model had seen, an unpredictable extrapolation. Fixed by:
+  (1) adding `pct_shelf_life_remaining = days_to_expiry / expected_shelf_life_days`
+  as a category-normalized feature, (2) resampling training data with
+  **per-category-realistic shelf-life ranges** (`train.py::_SHELF_LIFE_RANGE_BY_PERISHABILITY`,
+  2-5 days for perishability 5 down to 180-540 days for perishability 1)
+  instead of one uniform range for every row, (3) rewriting `synthetic_label`
+  to drive expiry-urgency primarily off `pct_shelf_life_remaining` (full
+  weight at ≤0% remaining, zero weight at ≥25% remaining) with raw
+  `days_to_expiry≤0` kept only as a small secondary "physically past date"
+  term. Verified against the live DB post-fix: all 35 Rice/Canned-Goods
+  batches in the demo dataset now correctly score LOW (previously several
+  were miscategorized). 4 new unit tests
+  (`tests/unit/test_food_risk_features.py`) lock this in permanently,
+  including one asserting a short-shelf-life item and a long-shelf-life
+  item at the *same* % remaining score comparably.
 - **Training labels**: since no real incident-labeled dataset exists, labels
   come from `features.synthetic_label()` — a documented weighted-rule formula
   (expiry proximity + perishability + cumulative temp exposure + storage
@@ -26,8 +48,8 @@ artifact (`models/food_risk/latest.json`).
   historical incidents, plus Gaussian noise). This is exactly the "rule
   weights get learned instead of hand-tuned" idea from the spec, but the
   ground truth is synthetic-by-construction.
-- **Result on last training run** (20,000 synthetic rows): precision 0.96,
-  recall 0.95, F1 0.95, ROC-AUC 0.999. **This is expected to be near-perfect**
+- **Result on last training run** (20,000 synthetic rows): precision 0.95,
+  recall 0.95, F1 0.95, ROC-AUC 0.998. **This is expected to be near-perfect**
   because the label is a deterministic function of the features it's trained
   on — it demonstrates the model correctly *recovers* the encoded relationship,
   not real-world food-safety accuracy. Say this explicitly in viva.

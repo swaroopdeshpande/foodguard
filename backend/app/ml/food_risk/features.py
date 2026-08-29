@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 FEATURE_COLUMNS = [
     "days_to_expiry",
+    "pct_shelf_life_remaining",
     "perishability_level",
     "current_temperature",
     "temperature_deviation",
@@ -54,7 +55,8 @@ def build_feature_frame(
     sql = """
         SELECT b.id AS batch_id, b.expiry_date, b.manufacturing_date, b.received_at,
                b.storage_unit_id, b.food_item_id, b.supplier_id, b.is_opened,
-               c.perishability_level, c.required_min_temp_c, c.required_max_temp_c
+               c.perishability_level, c.required_min_temp_c, c.required_max_temp_c,
+               c.expected_shelf_life_days
         FROM food_batches b
         JOIN food_items fi ON fi.id = b.food_item_id
         JOIN food_categories c ON c.id = fi.category_id
@@ -72,6 +74,12 @@ def build_feature_frame(
     for _, b in batches.iterrows():
         days_to_expiry = (pd.Timestamp(b.expiry_date) - pd.Timestamp(as_of.date())).days
         batch_age = (as_of.date() - b.manufacturing_date).days
+        # category-normalized urgency: 4 days left on a 4-day-shelf-life chicken batch
+        # (pct=1.0, fresh) is NOT the same risk as 4 days left on a 540-day-shelf-life
+        # canned good (pct=0.007, essentially expired) -- raw days_to_expiry alone
+        # can't distinguish these, this feature can. See ML.md for why this was added.
+        shelf_life = max(int(b.expected_shelf_life_days or 1), 1)
+        pct_shelf_life_remaining = days_to_expiry / shelf_life
 
         # storage readings for this batch's unit, since it was received
         readings = pd.read_sql(
@@ -138,6 +146,7 @@ def build_feature_frame(
         rows.append({
             "batch_id": b.batch_id,
             "days_to_expiry": days_to_expiry,
+            "pct_shelf_life_remaining": round(pct_shelf_life_remaining, 4),
             "perishability_level": b.perishability_level,
             "current_temperature": current_temp,
             "temperature_deviation": temperature_deviation,
@@ -161,14 +170,23 @@ def synthetic_label(row: pd.Series) -> int:
     since no real incident-labeled dataset exists. Documented explicitly as synthetic
     (see ML.md) -- this is how domain knowledge gets encoded into the training labels.
     Returns 1 (will-become-high-risk) or 0.
+
+    Expiry urgency is driven by pct_shelf_life_remaining (category-normalized),
+    NOT raw days_to_expiry -- a chicken batch with 1 day left (25% of its 4-day
+    shelf life) and a rice batch with 90 days left (25% of its 365-day shelf
+    life) are equally urgent and must score comparably. Raw days_to_expiry is
+    kept only as a small secondary term (catches "already physically expired"
+    regardless of category) so it doesn't dominate or get relied on alone.
     """
     score = 0.0
-    score += max(0, (5 - row.days_to_expiry)) * 0.12
+    # full weight once <=0% shelf life remains, zero weight once >=25% remains
+    score += np.clip((0.25 - row.pct_shelf_life_remaining) / 0.25, 0, 1) * 0.35
+    score += (0.10 if row.days_to_expiry <= 0 else 0)  # already physically past date, any category
     score += (row.perishability_level / 5) * 0.15
-    score += min(row.cumulative_temperature_exposure / 20, 1) * 0.25
-    score += min(row.storage_deviation_duration / 12, 1) * 0.15
-    score += (1 - row.supplier_reliability) * 0.15
-    score += min(row.previous_rejection_rate * 5, 1) * 0.08
+    score += min(row.cumulative_temperature_exposure / 20, 1) * 0.20
+    score += min(row.storage_deviation_duration / 12, 1) * 0.12
+    score += (1 - row.supplier_reliability) * 0.12
+    score += min(row.previous_rejection_rate * 5, 1) * 0.06
     score += (0.05 if row.consumption_change < -0.4 else 0)
     score += min(row.historical_incidents / 5, 1) * 0.05
     noise = np.random.normal(0, 0.05)

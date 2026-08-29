@@ -46,10 +46,42 @@ RNG = np.random.default_rng(42)
 MODEL_DIR = Path(__file__).resolve().parents[4] / "models" / "food_risk"
 
 
+# perishability_level -> realistic shelf-life range (days), matching the
+# category defs in scripts/generate_demo_data.py (5=fish/chicken ~2-5 days,
+# 1=rice/canned ~200-540 days). Sampling shelf_life PER ROW like this (instead
+# of one uniform days_to_expiry range for every row regardless of category)
+# is what makes pct_shelf_life_remaining a meaningful, learnable feature --
+# see the note on synthetic_label and ML.md for why raw days_to_expiry alone
+# can't generalize across a 2-day vs 540-day shelf life.
+_SHELF_LIFE_RANGE_BY_PERISHABILITY = {
+    5: (2, 5),
+    4: (5, 10),
+    3: (5, 21),
+    2: (20, 60),
+    1: (180, 540),
+}
+
+
+def _sample_shelf_life_days(perishability_levels: np.ndarray) -> np.ndarray:
+    out = np.empty(len(perishability_levels), dtype=float)
+    for level, (lo, hi) in _SHELF_LIFE_RANGE_BY_PERISHABILITY.items():
+        mask = perishability_levels == level
+        out[mask] = RNG.uniform(lo, hi, mask.sum())
+    return out
+
+
 def generate_training_frame(n: int) -> pd.DataFrame:
+    perishability = RNG.integers(1, 6, n)
+    shelf_life_days = _sample_shelf_life_days(perishability)
+    # -0.15 to 1.3: covers "already expired" through "fresh with margin", same
+    # distribution shape regardless of the row's absolute shelf_life_days
+    pct_shelf_life_remaining = RNG.uniform(-0.15, 1.3, n)
+    days_to_expiry = np.round(pct_shelf_life_remaining * shelf_life_days).astype(int)
+
     df = pd.DataFrame({
-        "days_to_expiry": RNG.integers(-2, 30, n),
-        "perishability_level": RNG.integers(1, 6, n),
+        "days_to_expiry": days_to_expiry,
+        "pct_shelf_life_remaining": pct_shelf_life_remaining,
+        "perishability_level": perishability,
         "storage_deviation_duration": np.clip(RNG.exponential(1.5, n), 0, 24).round(1),
         "supplier_reliability": np.clip(RNG.normal(0.8, 0.15, n), 0, 1),
         "previous_rejection_rate": np.clip(RNG.exponential(0.03, n), 0, 0.5),
@@ -63,7 +95,7 @@ def generate_training_frame(n: int) -> pd.DataFrame:
     df["current_temperature"] = RNG.normal(4, 2, n)
     df["temperature_deviation"] = np.clip(df.cumulative_temperature_exposure / (df.storage_deviation_duration + 1), 0, 6)
     df["humidity"] = RNG.normal(50, 8, n)
-    df["batch_age"] = RNG.integers(0, 30, n)
+    df["batch_age"] = np.clip((1 - pct_shelf_life_remaining) * shelf_life_days, 0, None).round().astype(int)
     df["consumption_rate"] = np.clip(RNG.normal(15, 5, n), 0, None)
 
     df = df[FEATURE_COLUMNS]
