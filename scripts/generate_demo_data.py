@@ -254,10 +254,10 @@ def generate_supplier_deliveries_and_batches(
             expiry_date = mfg_date + timedelta(days=declared_shelf_life)
             batch_code = f"{supplier.batch_prefix}-{mfg_date.strftime('%y%m%d')}-{RNG.randint(100,999)}"
 
-            if scenario == "label_fraud" and sname == anomalous_supplier and is_recent:
-                if reused_batch_code is None:
-                    reused_batch_code = batch_code
-                else:
+            if scenario == "label_fraud" and sname == anomalous_supplier:
+                if d == 2 and reused_batch_code is None:
+                    reused_batch_code = batch_code  # planted early, will be "reused" much later
+                elif is_recent and reused_batch_code is not None:
                     batch_code = reused_batch_code  # duplicate batch code reused months apart -> fraud signal
                     expiry_date = mfg_date + timedelta(days=declared_shelf_life + 25)  # inconsistent shelf life
 
