@@ -37,10 +37,25 @@ artifact (`models/food_risk/latest.json`).
   `days_to_expiry≤0` kept only as a small secondary "physically past date"
   term. Verified against the live DB post-fix: all 35 Rice/Canned-Goods
   batches in the demo dataset now correctly score LOW (previously several
-  were miscategorized). 4 new unit tests
-  (`tests/unit/test_food_risk_features.py`) lock this in permanently,
-  including one asserting a short-shelf-life item and a long-shelf-life
-  item at the *same* % remaining score comparably.
+  were miscategorized).
+- **Follow-up fix**: a flat 25%-shelf-life-remaining cutoff for every
+  category meant chicken with 1 of 4 days left (exactly 25%) scored as
+  safe as fresh (0% risk) — technically consistent with the formula, but
+  wrong in practice for a highly perishable item. `_urgency_cutoff()` now
+  scales the cutoff itself by `perishability_level`: 50% remaining for
+  the most perishable items (chicken/fish) down to 8% for shelf-stable
+  ones (rice/canned) — linear interpolation across the 1-5 scale.
+  Re-verified live: same 1-of-4-days chicken batch now scores HIGH/88.7%
+  → `DO_NOT_SERVE`, fresh chicken stays LOW/0%, rice at a comparable
+  ~25% point stays LOW.
+- 6 unit tests (`tests/unit/test_food_risk_features.py`) lock in both
+  fixes permanently. Note: tests compare `deterministic_risk_score()`
+  (the formula without its Gaussian noise term) rather than the final
+  noisy `synthetic_label()` output where equality matters — a real flake
+  was found while tuning the cutoff weight, where two rows with an
+  intentionally-identical underlying score landed on opposite sides of
+  the label threshold purely because each call draws its own independent
+  noise sample.
 - **Training labels**: since no real incident-labeled dataset exists, labels
   come from `features.synthetic_label()` — a documented weighted-rule formula
   (expiry proximity + perishability + cumulative temp exposure + storage

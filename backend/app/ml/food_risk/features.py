@@ -165,6 +165,16 @@ def build_feature_frame(
     return pd.DataFrame(rows)
 
 
+def _urgency_cutoff(perishability_level: float) -> float:
+    """Pct-shelf-life-remaining threshold below which expiry urgency kicks in,
+    scaled by perishability: a highly perishable item (chicken, level 5)
+    should be flagged much earlier -- e.g. still 50% of its shelf life left --
+    than a shelf-stable item (rice/canned, level 1), which is fine down to
+    single-digit percent remaining. Linear from 8% (level 1) to 50% (level 5).
+    """
+    return 0.08 + (np.clip(perishability_level, 1, 5) - 1) / 4 * (0.50 - 0.08)
+
+
 def synthetic_label(row: pd.Series) -> int:
     """Rule-based ground-truth generator used ONLY to bootstrap supervised training,
     since no real incident-labeled dataset exists. Documented explicitly as synthetic
@@ -174,13 +184,34 @@ def synthetic_label(row: pd.Series) -> int:
     Expiry urgency is driven by pct_shelf_life_remaining (category-normalized),
     NOT raw days_to_expiry -- a chicken batch with 1 day left (25% of its 4-day
     shelf life) and a rice batch with 90 days left (25% of its 365-day shelf
-    life) are equally urgent and must score comparably. Raw days_to_expiry is
-    kept only as a small secondary term (catches "already physically expired"
+    life) are otherwise-comparable urgency signals. Raw days_to_expiry is kept
+    only as a small secondary term (catches "already physically expired"
     regardless of category) so it doesn't dominate or get relied on alone.
+
+    The urgency THRESHOLD itself is also perishability-scaled (_urgency_cutoff):
+    highly perishable items get flagged much earlier (still ~50% shelf life
+    left) than shelf-stable ones (down to ~8% left) -- a flat 25%-for-everyone
+    cutoff meant 1-day-left-on-4-day-chicken (25% exactly) scored as safe as
+    fresh, which is wrong in practice.
     """
+    score = deterministic_risk_score(row)
+    noise = np.random.normal(0, 0.05)
+    return int((score + noise) > 0.45)
+
+
+def deterministic_risk_score(row: pd.Series) -> float:
+    """The synthetic_label formula without the noise term -- exposed
+    separately so tests can compare two rows' underlying scores without
+    flakiness from independent random draws on each call (a real bug found
+    while tuning _urgency_cutoff: two borderline-equal rows landed on
+    opposite sides of the label threshold purely by noise-draw luck)."""
     score = 0.0
-    # full weight once <=0% shelf life remains, zero weight once >=25% remains
-    score += np.clip((0.25 - row.pct_shelf_life_remaining) / 0.25, 0, 1) * 0.35
+    cutoff = _urgency_cutoff(row.perishability_level)
+    # weight 0.65: tuned so a highly-perishable item halfway through its
+    # cutoff zone (e.g. chicken at 25% shelf life left, cutoff 50%) clears
+    # the 0.45 label threshold together with its own perishability_level
+    # term, instead of silently staying "safe" until 0% remains.
+    score += np.clip((cutoff - row.pct_shelf_life_remaining) / cutoff, 0, 1) * 0.65
     score += (0.10 if row.days_to_expiry <= 0 else 0)  # already physically past date, any category
     score += (row.perishability_level / 5) * 0.15
     score += min(row.cumulative_temperature_exposure / 20, 1) * 0.20
@@ -189,5 +220,4 @@ def synthetic_label(row: pd.Series) -> int:
     score += min(row.previous_rejection_rate * 5, 1) * 0.06
     score += (0.05 if row.consumption_change < -0.4 else 0)
     score += min(row.historical_incidents / 5, 1) * 0.05
-    noise = np.random.normal(0, 0.05)
-    return int((score + noise) > 0.45)
+    return score
