@@ -37,24 +37,30 @@ for the system diagram, `docs/DEMO.md` for the exact demo script.
   models/anomaly engines → fusion → `incidents` table, run end-to-end and
   verified against real data in Postgres.
 
+## Also built since the above (REST API, live-sim, frontend, unit-failure)
+
+- **REST API** (FastAPI): auth (JWT+roles), dashboard summary, inventory,
+  storage, suppliers, incidents (+resolve), pipeline trigger, OCR scan —
+  all smoke-tested live end-to-end.
+- **WebSocket live-sim** (`/ws/live` + `/api/simulation/trigger`):
+  regenerates a scenario, reruns the pipeline, pushes the result to every
+  connected dashboard with no polling. Verified live.
+- **React + TypeScript + Tailwind frontend**: Login, Dashboard, Inventory,
+  Storage, Suppliers, Incidents, Label Scanner — wired to the live API and
+  the WebSocket feed. `tsc` and production build both clean.
+- **Correlated unit-failure detection**: wired into the pipeline
+  (`run_unit_failure_detection`), verified both at the algorithm level and
+  via an e2e DB test. See `docs/ML.md` for the honest caveat on when it
+  actually fires (needs risk progression across runs, not two static ones).
+
 ## Not yet built (honest status, next steps)
 
-- **REST API** (FastAPI routes) — the pipeline/services layer underneath is
-  done and tested directly in Python; no HTTP layer wired yet.
-- **Auth** (JWT + roles) — models exist (`users.py`, `RoleEnum`), no login
-  flow yet.
-- **Correlated unit-failure detection** — algorithm implemented
-  (`app/anomaly/unit_failure.py`) but needs multi-run risk history to have
-  anything to correlate; not wired into the single-pass pipeline yet.
-- **WebSocket replay engine** (Phase 21, the "no hardware, live simulation"
-  piece) — not started.
-- **React frontend** — not started.
-- **OCR label-scanning endpoint** — Tesseract is installed and ready, no
-  endpoint wraps it yet.
 - **docs/ARCHITECTURE.md, API.md, DEMO.md, PROJECT_REPORT.md** — not yet
   written (only ML.md and this README exist so far).
-- **Offline end-to-end check** — not run yet (nothing to check without the
-  API/frontend running).
+- **Offline end-to-end check** — not run yet.
+- Frontend has not been visually verified in an actual browser this
+  session (no browser extension connected) — build/typecheck/API-integration
+  all pass, but eyeball it yourself before the review.
 
 ## Quick start (what works today)
 

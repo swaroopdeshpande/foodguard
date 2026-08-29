@@ -89,11 +89,29 @@ both `POSSIBLE_BATCH_REUSE` and `INCONSISTENT_SHELF_LIFE` fire correctly.
 
 Requires a **history** of risk scores per batch (multiple pipeline runs over
 time) to compute co-movement/correlation — a single pipeline pass only has
-one risk snapshot per batch, so this module needs the pipeline to be run
-repeatedly across simulated days (see `unit_failure` scenario + the
-WebSocket replay engine, Phase 21) before it has anything to correlate.
-**Status: implemented (`app/anomaly/unit_failure.py`) but not yet wired into
-`pipeline.py`, since that requires the replay/time-series harness.**
+one risk snapshot per batch. `run_unit_failure_detection` (in `pipeline.py`)
+reads the accumulated `risk_predictions` rows per batch per storage unit and
+calls `detect_unit_incident` (Pearson correlation of co-rising risk
+trajectories, ≥3 batches required).
+
+**Honest caveat**: two pipeline runs against *static* historical data produce
+*identical* risk scores (nothing changed in between), so `delta > 0.15`
+never trips and no incident fires — verified this directly (`run 1` and
+`run 2` both returned `unit_failure_incidents: 0` against unchanged data).
+This is correct behavior, not a bug: the detector needs genuine risk
+*progression* over time, which only happens as real (or simulated) time
+passes and conditions actually worsen — e.g. across successive
+`/api/simulation/trigger` calls as a scenario's storage drift continues.
+
+Verification split accordingly:
+- **Algorithm-level** (`tests/unit/test_unit_failure.py`): 3 tests, pure
+  synthetic risk series, proves correlation logic is correct in isolation.
+- **Wiring-level** (`tests/e2e/test_unit_failure_pipeline.py`): seeds
+  progressing `risk_predictions` rows directly for 3 batches sharing a
+  storage unit against the real Postgres DB, proves `run_unit_failure_detection`
+  correctly creates a `UnitIncident` row + a `MAINTENANCE`-routed `Incident`,
+  and that it's actually persisted (not just returned in-memory). Cleans up
+  after itself so repeated runs don't pollute the demo DB.
 
 ## Fusion Engine
 
@@ -112,6 +130,8 @@ kept in `dimensions_snapshot`, not collapsed into a single number.
    "IN_STOCK" batches, inflating DO_NOT_SERVE counts. Acceptable for a
    scenario-focused demo; would need batch-lifecycle transitions for a
    longer-running deployment.
-3. Correlated unit-failure detection needs multi-run risk history — not yet
-   wired end-to-end (see above).
+3. Correlated unit-failure detection is wired end-to-end but only fires
+   when risk scores actually progress between pipeline runs (see above) —
+   demoing it live needs a scenario run across genuinely advancing time
+   (repeated simulation triggers), not two instantaneous runs.
 4. No real supplier/hotel data has been used or is claimed anywhere.

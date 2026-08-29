@@ -18,9 +18,10 @@ from sqlalchemy.orm import Session
 from app.anomaly.consumption import detect_consumption_anomaly
 from app.anomaly.label_fraud import run_all_checks
 from app.anomaly.storage_drift import analyze_unit_series
+from app.anomaly.unit_failure import detect_unit_incident
 from app.ml.food_risk.features import FEATURE_COLUMNS, build_feature_frame
 from app.ml.supplier_anomaly.detect import score_latest_delivery
-from app.models.anomalies import ConsumptionAnomaly, LabelAnomaly, StorageAnomaly, SupplierAnomaly
+from app.models.anomalies import ConsumptionAnomaly, LabelAnomaly, StorageAnomaly, SupplierAnomaly, UnitIncident
 from app.models.incidents import Incident
 from app.models.labels import LabelScan
 from app.models.risk import RiskPrediction
@@ -218,12 +219,73 @@ def run_consumption_anomalies(db: Session) -> list[Incident]:
     return incidents
 
 
+def run_unit_failure_detection(db: Session) -> list[Incident]:
+    """Correlated multi-item failure detection (spec section 10).
+
+    Needs a HISTORY of risk scores per batch to find co-movement -- a single
+    pipeline pass only has one risk snapshot per batch. Uses the
+    `risk_predictions` table's accumulated rows across however many times
+    `run_food_risk` has been called so far (each pipeline run adds one row
+    per IN_STOCK batch), so this only produces a result once the pipeline
+    has been run at least twice against the same batches (e.g. via repeated
+    /api/simulation/trigger calls, or scripts/run_pipeline_twice.py).
+    """
+    units = db.execute(text("SELECT id, name FROM storage_units")).fetchall()
+    incidents = []
+    for uid, name in units:
+        batch_ids = db.execute(
+            text("SELECT id FROM food_batches WHERE storage_unit_id=:u AND status='IN_STOCK'"),
+            {"u": str(uid)},
+        ).scalars().all()
+        if len(batch_ids) < 3:
+            continue
+
+        series_by_batch = {}
+        for bid in batch_ids:
+            rows = db.execute(
+                text("""SELECT predicted_at, risk_probability FROM risk_predictions
+                         WHERE food_batch_id=:b ORDER BY predicted_at"""),
+                {"b": str(bid)},
+            ).fetchall()
+            if len(rows) >= 2:
+                series_by_batch[str(bid)] = pd.Series(
+                    [float(r[1]) for r in rows], index=[r[0] for r in rows]
+                )
+
+        result = detect_unit_incident(series_by_batch)
+        if result is None:
+            continue
+
+        unit_incident = UnitIncident(
+            storage_unit_id=uid, affected_food_batch_ids=result.affected_batch_ids,
+            correlation_score=result.correlation_score, severity=result.severity,
+        )
+        db.add(unit_incident)
+        db.flush()
+
+        fusion_out = fuse(FusionInput(unit_incident_severity=result.severity))
+        incident = Incident(
+            source_type="UNIT_INCIDENT", source_id=unit_incident.id, action=fusion_out.action,
+            department=fusion_out.department, severity=fusion_out.severity,
+            reason_codes=fusion_out.reason_codes,
+            dimensions_snapshot={
+                **fusion_out.dimensions_snapshot, "storage_unit": name,
+                "affected_batches": len(result.affected_batch_ids),
+            },
+        )
+        db.add(incident)
+        incidents.append(incident)
+    db.flush()
+    return incidents
+
+
 def run_full_pipeline(db: Session) -> dict:
     counts = {
         "food_risk_incidents": len(run_food_risk(db)),
         "storage_incidents": len(run_storage_anomalies(db)),
         "supplier_incidents": len(run_supplier_anomalies(db)),
         "consumption_incidents": len(run_consumption_anomalies(db)),
+        "unit_failure_incidents": len(run_unit_failure_detection(db)),
     }
     db.commit()
     return counts

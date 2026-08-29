@@ -71,6 +71,7 @@ class PipelineRunResult(BaseModel):
     storage_incidents: int
     supplier_incidents: int
     consumption_incidents: int
+    unit_failure_incidents: int
 
 
 class LabelScanResult(BaseModel):
