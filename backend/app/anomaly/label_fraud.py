@@ -73,6 +73,23 @@ def check_duplicate_batch_reuse(
     return None
 
 
+def check_batch_code_already_exists(db: Session, batch_code: str) -> LabelAnomalyFinding | None:
+    """Pre-confirm heads-up for a freshly-scanned label (no food_batch row yet):
+    does this batch code already exist anywhere in history? Softer than
+    check_duplicate_batch_reuse (no gap threshold, no current-batch context)."""
+    row = db.execute(
+        text("SELECT id, received_at FROM food_batches WHERE batch_code = :code ORDER BY received_at LIMIT 1"),
+        {"code": batch_code},
+    ).first()
+    if not row:
+        return None
+    return LabelAnomalyFinding(
+        "POSSIBLE_BATCH_REUSE", "MEDIUM",
+        {"batch_code": batch_code, "existing_batch_id": str(row[0]), "existing_received_at": str(row[1]),
+         "reason": "batch code already exists in history; confirm this is a new delivery, not a re-scan"},
+    )
+
+
 def run_all_checks(
     db: Session, batch_id: str, batch_code: str, mfg_date: date, expiry_date: date, category_expected_days: int,
 ) -> list[LabelAnomalyFinding]:

@@ -108,7 +108,7 @@ def seed_reference_data(db: Session):
         units[name] = u
 
     admin = User(
-        email="admin@foodguard.local", full_name="Admin User",
+        email="admin@foodguard.internal", full_name="Admin User",
         hashed_password="$2b$12$placeholderhashplaceholderhashplaceholderha",  # set properly via auth service
         role=RoleEnum.ADMIN,
     )
