@@ -34,6 +34,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "backend"))
 
 from sqlalchemy.orm import Session  # noqa: E402
 
+from app.core.security import hash_password  # noqa: E402
 from app.database.session import Base, SessionLocal, engine  # noqa: E402
 from app.models.consumption import ConsumptionRecord, WastageRecord  # noqa: E402
 from app.models.food import FoodBatch, FoodCategory, FoodItem  # noqa: E402
@@ -107,12 +108,15 @@ def seed_reference_data(db: Session):
         db.add(u)
         units[name] = u
 
-    admin = User(
-        email="admin@foodguard.internal", full_name="Admin User",
-        hashed_password="$2b$12$placeholderhashplaceholderhashplaceholderha",  # set properly via auth service
-        role=RoleEnum.ADMIN,
-    )
-    db.add(admin)
+    # Demo accounts recreated on every reset (scenario triggers drop/recreate
+    # all tables including `users`) -- always-known credentials so the demo
+    # never gets locked out of its own dashboard. NOT for production use.
+    for email, name, role in [
+        ("admin@foodguard.internal", "Admin User", RoleEnum.ADMIN),
+        ("manager@foodguard.internal", "Demo Manager", RoleEnum.MANAGER),
+        ("kitchen@foodguard.internal", "Kitchen Staff", RoleEnum.KITCHEN),
+    ]:
+        db.add(User(email=email, full_name=name, hashed_password=hash_password("demo1234"), role=role))
 
     db.flush()
     return categories, suppliers, units

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, dashboard, incidents, inventory, ocr, pipeline, storage, suppliers
+from app.api.routes import auth, dashboard, incidents, inventory, ocr, pipeline, simulation, storage, suppliers
 
 app = FastAPI(
     title="FoodGuard API",
@@ -26,6 +26,7 @@ app.include_router(suppliers.router)
 app.include_router(incidents.router)
 app.include_router(pipeline.router)
 app.include_router(ocr.router)
+app.include_router(simulation.router)
 
 
 @app.get("/api/health")
