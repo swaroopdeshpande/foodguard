@@ -46,12 +46,12 @@ def _risk_class(p: float) -> str:
     return "LOW"
 
 
-def run_food_risk(db: Session) -> list[Incident]:
+def run_food_risk(db: Session, batch_ids: list[str] | None = None) -> list[Incident]:
     model, version = _load_food_risk_model()
     if model is None:
         return []
 
-    features = build_feature_frame(db)
+    features = build_feature_frame(db, batch_ids=batch_ids)
     incidents = []
     for _, row in features.iterrows():
         X = row[FEATURE_COLUMNS].to_frame().T.astype(float)
@@ -114,8 +114,13 @@ def run_food_risk(db: Session) -> list[Incident]:
     return incidents
 
 
-def run_storage_anomalies(db: Session) -> list[Incident]:
-    units = db.execute(text("SELECT id, name, target_temp_c FROM storage_units")).fetchall()
+def run_storage_anomalies(db: Session, unit_id: str | None = None) -> list[Incident]:
+    sql = "SELECT id, name, target_temp_c FROM storage_units"
+    params = {}
+    if unit_id:
+        sql += " WHERE id = :uid"
+        params["uid"] = unit_id
+    units = db.execute(text(sql), params).fetchall()
     incidents = []
     for uid, name, target in units:
         df = pd.read_sql(
@@ -150,8 +155,13 @@ def run_storage_anomalies(db: Session) -> list[Incident]:
     return incidents
 
 
-def run_supplier_anomalies(db: Session) -> list[Incident]:
-    suppliers = db.execute(text("SELECT id, name FROM suppliers")).fetchall()
+def run_supplier_anomalies(db: Session, supplier_id: str | None = None) -> list[Incident]:
+    sql = "SELECT id, name FROM suppliers"
+    params = {}
+    if supplier_id:
+        sql += " WHERE id = :sid"
+        params["sid"] = supplier_id
+    suppliers = db.execute(text(sql), params).fetchall()
     incidents = []
     for sid, name in suppliers:
         df = pd.read_sql(
@@ -184,8 +194,13 @@ def run_supplier_anomalies(db: Session) -> list[Incident]:
     return incidents
 
 
-def run_consumption_anomalies(db: Session) -> list[Incident]:
-    items = db.execute(text("SELECT id, name FROM food_items")).fetchall()
+def run_consumption_anomalies(db: Session, food_item_id: str | None = None) -> list[Incident]:
+    sql = "SELECT id, name FROM food_items"
+    params = {}
+    if food_item_id:
+        sql += " WHERE id = :fid"
+        params["fid"] = food_item_id
+    items = db.execute(text(sql), params).fetchall()
     incidents = []
     for fid, name in items:
         df = pd.read_sql(

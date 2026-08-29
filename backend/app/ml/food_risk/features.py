@@ -37,27 +37,34 @@ def _supplier_reliability(defect_rate: float, complaint_rate: float, delay_days:
     return float(max(0.0, 1.0 - penalty))
 
 
-def build_feature_frame(db: Session, as_of: datetime | None = None) -> pd.DataFrame:
+def build_feature_frame(
+    db: Session, as_of: datetime | None = None, batch_ids: list[str] | None = None,
+) -> pd.DataFrame:
     """Builds one feature row per IN_STOCK food batch, as of `as_of` (default: now).
 
     Pulls from food_batches, food_categories, suppliers, supplier_deliveries,
     storage_readings, consumption_records, wastage_records via a handful of
     scalar subqueries per batch — fine at this data scale (100s-1000s of batches).
+
+    `batch_ids`: restrict to specific batches (e.g. score just a
+    newly-created one instead of rescanning the whole inventory).
     """
     as_of = as_of or datetime.now(timezone.utc)
 
-    batches = pd.read_sql(
-        text("""
-            SELECT b.id AS batch_id, b.expiry_date, b.manufacturing_date, b.received_at,
-                   b.storage_unit_id, b.food_item_id, b.supplier_id, b.is_opened,
-                   c.perishability_level, c.required_min_temp_c, c.required_max_temp_c
-            FROM food_batches b
-            JOIN food_items fi ON fi.id = b.food_item_id
-            JOIN food_categories c ON c.id = fi.category_id
-            WHERE b.status = 'IN_STOCK'
-        """),
-        db.bind,
-    )
+    sql = """
+        SELECT b.id AS batch_id, b.expiry_date, b.manufacturing_date, b.received_at,
+               b.storage_unit_id, b.food_item_id, b.supplier_id, b.is_opened,
+               c.perishability_level, c.required_min_temp_c, c.required_max_temp_c
+        FROM food_batches b
+        JOIN food_items fi ON fi.id = b.food_item_id
+        JOIN food_categories c ON c.id = fi.category_id
+        WHERE b.status = 'IN_STOCK'
+    """
+    params = {}
+    if batch_ids:
+        sql += " AND b.id = ANY(:batch_ids)"
+        params["batch_ids"] = batch_ids
+    batches = pd.read_sql(text(sql), db.bind, params=params)
     if batches.empty:
         return pd.DataFrame(columns=["batch_id", *FEATURE_COLUMNS])
 

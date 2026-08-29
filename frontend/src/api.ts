@@ -81,6 +81,33 @@ export interface Incident {
   dimensions_snapshot: Record<string, any>;
 }
 
+export interface RefItem {
+  id: string;
+  name: string;
+}
+export interface CategoryRef extends RefItem {
+  required_min_temp_c: number;
+  required_max_temp_c: number;
+  expected_shelf_life_days: number;
+}
+export interface FoodItemRef extends RefItem {
+  category_id: string;
+  category_name: string;
+}
+export interface StorageUnitRef extends RefItem {
+  target_temp_c: number;
+}
+
+export interface ManualEntryResult {
+  created_id: string;
+  risk_prediction: { risk_probability: number; risk_class: string; top_factors: Record<string, number> } | null;
+  label_anomalies: any[];
+  storage_anomaly: { anomaly_type: string; severity: string; current_value: number; expected_value: number; estimated_days_to_threshold: number | null } | null;
+  supplier_anomaly: { anomaly_score: number; severity: string; deviating_features: Record<string, any> } | null;
+  consumption_anomaly: { z_score: number; pct_change: number; severity: string; recommendation: string } | null;
+  incident: { action: string; department: string; severity: string; reason_codes: string[]; dimensions_snapshot: Record<string, any> } | null;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ access_token: string; role: string }>("/api/auth/login", {
@@ -106,6 +133,16 @@ export const api = {
     form.append("file", file);
     return request<any>("/api/ocr/scan", { method: "POST", body: form });
   },
+
+  // manual entry
+  refCategories: () => request<CategoryRef[]>("/api/manual/reference/categories"),
+  refFoodItems: () => request<FoodItemRef[]>("/api/manual/reference/food-items"),
+  refSuppliers: () => request<RefItem[]>("/api/manual/reference/suppliers"),
+  refStorageUnits: () => request<StorageUnitRef[]>("/api/manual/reference/storage-units"),
+  createBatch: (body: object) => request<ManualEntryResult>("/api/manual/batches", { method: "POST", body: JSON.stringify(body) }),
+  createReading: (body: object) => request<ManualEntryResult>("/api/manual/storage-readings", { method: "POST", body: JSON.stringify(body) }),
+  createDelivery: (body: object) => request<ManualEntryResult>("/api/manual/supplier-deliveries", { method: "POST", body: JSON.stringify(body) }),
+  createConsumption: (body: object) => request<ManualEntryResult>("/api/manual/consumption", { method: "POST", body: JSON.stringify(body) }),
 };
 
 export function wsUrl() {

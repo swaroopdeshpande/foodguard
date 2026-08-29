@@ -5,6 +5,7 @@ import { useState } from "react";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard" },
+  { to: "/manual-entry", label: "Manual Entry" },
   { to: "/inventory", label: "Inventory" },
   { to: "/storage", label: "Storage" },
   { to: "/suppliers", label: "Suppliers" },
@@ -24,6 +25,7 @@ export default function Layout() {
       window.dispatchEvent(new CustomEvent("fg:refresh"));
     }
     if (e.type === "SCENARIO_FAILED") setToast(`Scenario failed: ${e.error?.slice(0, 100)}`);
+    if (e.type === "MANUAL_ENTRY") window.dispatchEvent(new CustomEvent("fg:refresh"));
   });
 
   return (
