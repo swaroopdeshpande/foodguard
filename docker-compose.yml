@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: foodguard_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: foodguard
+      POSTGRES_PASSWORD: foodguard
+      POSTGRES_DB: foodguard
+    ports:
+      - "5433:5432"
+    volumes:
+      - foodguard_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodguard -d foodguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  foodguard_pgdata:
