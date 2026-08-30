@@ -143,6 +143,20 @@ export const api = {
   createReading: (body: object) => request<ManualEntryResult>("/api/manual/storage-readings", { method: "POST", body: JSON.stringify(body) }),
   createDelivery: (body: object) => request<ManualEntryResult>("/api/manual/supplier-deliveries", { method: "POST", body: JSON.stringify(body) }),
   createConsumption: (body: object) => request<ManualEntryResult>("/api/manual/consumption", { method: "POST", body: JSON.stringify(body) }),
+
+  // FoodWise (real-data-only, ledger-backed)
+  foodwiseDashboard: () => request<any>("/api/foodwise/dashboard"),
+  foodwiseDelivery: (body: object) => request<any>("/api/foodwise/deliveries", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseConsumption: (body: object) => request<any>("/api/foodwise/consumption", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseWaste: (body: object) => request<any>("/api/foodwise/waste", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseStorageReading: (body: object) => request<any>("/api/foodwise/storage-readings", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseOccupancy: (body: object) => request<any>("/api/foodwise/occupancy", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseAdjustment: (body: object) => request<any>("/api/foodwise/stock-adjustments", { method: "POST", body: JSON.stringify(body) }),
+  foodwiseQuarantine: (batchId: string, reason: string) => request<any>(`/api/foodwise/batches/${batchId}/quarantine`, { method: "POST", body: JSON.stringify({ reason }) }),
+  foodwiseRelease: (batchId: string) => request<any>(`/api/foodwise/batches/${batchId}/release`, { method: "POST" }),
+  foodwiseCanUse: (batchId: string) => request<any>(`/api/foodwise/batches/${batchId}/can-use`),
+  foodwiseFefo: (foodItemId: string) => request<any[]>(`/api/foodwise/fefo/${foodItemId}`),
+  foodwiseUseFirst: () => request<any[]>("/api/foodwise/use-first"),
 };
 
 export function wsUrl() {

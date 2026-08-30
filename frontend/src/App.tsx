@@ -4,6 +4,7 @@ import Layout from "./Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import ManualEntry from "./pages/ManualEntry";
+import FoodWise from "./pages/FoodWise";
 import Inventory from "./pages/Inventory";
 import Storage from "./pages/Storage";
 import Suppliers from "./pages/Suppliers";
@@ -31,6 +32,7 @@ export default function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/manual-entry" element={<ManualEntry />} />
+            <Route path="/foodwise" element={<FoodWise />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/storage" element={<Storage />} />
             <Route path="/suppliers" element={<Suppliers />} />

@@ -37,10 +37,17 @@ from sqlalchemy.orm import Session  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.database.session import Base, SessionLocal, engine  # noqa: E402
 from app.models.consumption import ConsumptionRecord, WastageRecord  # noqa: E402
-from app.models.food import FoodBatch, FoodCategory, FoodItem  # noqa: E402
+from app.models.food import DataSourceEnum, FoodBatch, FoodCategory, FoodItem  # noqa: E402
+from app.models.ledger import InventoryTransaction, TransactionTypeEnum  # noqa: E402
 from app.models.storage import StorageReading, StorageUnit  # noqa: E402
 from app.models.suppliers import Supplier, SupplierDelivery  # noqa: E402
 from app.models.users import RoleEnum, User  # noqa: E402
+
+DEMO = DataSourceEnum.DEMO
+# All rows created by this script are tagged DEMO -- FoodWise's production
+# dashboard/ML/FEFO views filter to REAL by default (spec design rule #1/#68).
+# This generator exists purely to give the ML models something to train on
+# before real hotel history accumulates (spec section 2).
 
 RNG = random.Random(42)  # fixed seed -> reproducible demo runs
 
@@ -195,6 +202,7 @@ def generate_storage_readings(db: Session, units: dict[str, StorageUnit], days: 
                 storage_unit_id=unit.id, ts=ts,
                 temperature_c=round(temp, 2),
                 humidity_pct=round(RNG.uniform(40, 65), 1) if unit.target_humidity_pct else None,
+                data_source=DEMO,
             ))
         db.flush()
 
@@ -250,6 +258,7 @@ def generate_supplier_deliveries_and_batches(
                 defect_rate=round(defect_rate, 4), rejected_quantity_kg=rejected_kg,
                 complaint_count=complaint_count, price_per_kg=price,
                 remaining_shelf_life_days=declared_shelf_life, expiry_margin_days=expiry_margin,
+                data_source=DEMO,
             )
             db.add(delivery)
             db.flush()
@@ -271,9 +280,19 @@ def generate_supplier_deliveries_and_batches(
                 batch_code=batch_code, quantity=round(batch_kg - rejected_kg, 2),
                 manufacturing_date=mfg_date, expiry_date=expiry_date,
                 received_at=delivered_at, is_opened=RNG.random() < 0.3,
-                status="IN_STOCK",
+                status="IN_STOCK", data_source=DEMO,
             )
             db.add(batch)
+            db.flush()
+            # seed the ledger so current_quantity() (the actual source of truth
+            # everywhere now) matches this batch's quantity -- demo batches don't
+            # simulate per-batch drawdown, only aggregate per-item consumption
+            # (see generate_consumption_and_wastage), so the ledger just reflects
+            # "fully in stock" for demo purposes.
+            db.add(InventoryTransaction(
+                food_batch_id=batch.id, txn_type=TransactionTypeEnum.DELIVERY,
+                quantity_delta=batch.quantity, reason="Demo delivery seed", data_source=DEMO,
+            ))
             delivery.food_batch_id = None  # linked after flush below
             batches.append(batch)
         db.flush()
@@ -292,7 +311,7 @@ def generate_consumption_and_wastage(db: Session, items: dict[str, FoodItem], da
             if scenario == "consumption_drop" and name in ("Chicken", "Paneer") and d >= days - 5:
                 qty *= 0.35  # sudden, unexplained drop in usage -> possible early spoilage signal
 
-            db.add(ConsumptionRecord(food_item_id=item.id, ts=ts, quantity_consumed=round(qty, 2)))
+            db.add(ConsumptionRecord(food_item_id=item.id, ts=ts, quantity_consumed=round(qty, 2), data_source=DEMO))
 
             if RNG.random() < 0.08:
                 wasted = round(RNG.uniform(0.5, 3.0), 2)
@@ -300,8 +319,30 @@ def generate_consumption_and_wastage(db: Session, items: dict[str, FoodItem], da
                     food_item_id=item.id, ts=ts, quantity_wasted=wasted,
                     reason="expired" if RNG.random() < 0.6 else "damaged",
                     estimated_loss=round(wasted * float(item.unit_price), 2),
+                    data_source=DEMO,
                 ))
         db.flush()
+
+
+def generate_occupancy(db: Session, days: int):
+    from app.models.consumption import OccupancyRecord
+
+    now = datetime.now(timezone.utc)
+    for d in range(days):
+        record_date = now - timedelta(days=days - d)
+        base_occ = 60 + 20 * RNG.random() + 10 * (1 if record_date.weekday() >= 5 else 0)  # weekends busier
+        event = None
+        if RNG.random() < 0.05:
+            event = RNG.choice(["BANQUET", "WEDDING", "CONFERENCE"])
+            base_occ = min(100, base_occ + 20)
+        expected = int(base_occ * 3)  # rough covers-per-occupancy-pct heuristic
+        actual = max(0, int(RNG.gauss(expected, expected * 0.1)))
+        db.add(OccupancyRecord(
+            record_date=record_date, occupancy_pct=round(min(base_occ, 100), 1),
+            expected_guests=expected, actual_guests=actual, event_type=event,
+            data_source=DEMO,
+        ))
+    db.flush()
 
 
 def main():
@@ -338,6 +379,9 @@ def main():
 
         print("Generating consumption + wastage records...")
         generate_consumption_and_wastage(db, items, args.days, scenario)
+
+        print("Generating occupancy records...")
+        generate_occupancy(db, args.days)
 
         db.commit()
         print(f"Done. {len(batches)} food batches, {len(units)} storage units, "

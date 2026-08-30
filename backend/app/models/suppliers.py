@@ -1,10 +1,11 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
+from app.models.food import DataSourceEnum
 
 
 class Supplier(Base):
@@ -38,5 +39,9 @@ class SupplierDelivery(Base):
     price_per_kg: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     remaining_shelf_life_days: Mapped[int] = mapped_column(default=0)
     expiry_margin_days: Mapped[int] = mapped_column(default=0)  # declared shelf life vs category norm
+
+    data_source: Mapped[DataSourceEnum] = mapped_column(
+        Enum(DataSourceEnum, name="data_source_enum"), nullable=False, default=DataSourceEnum.REAL, index=True,
+    )
 
     supplier: Mapped["Supplier"] = relationship(back_populates="deliveries")

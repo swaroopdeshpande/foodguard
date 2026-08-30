@@ -4,6 +4,7 @@ import { useLiveSocket } from "./useLiveSocket";
 import { useState } from "react";
 
 const NAV = [
+  { to: "/foodwise", label: "FoodWise" },
   { to: "/dashboard", label: "Dashboard" },
   { to: "/manual-entry", label: "Manual Entry" },
   { to: "/inventory", label: "Inventory" },
